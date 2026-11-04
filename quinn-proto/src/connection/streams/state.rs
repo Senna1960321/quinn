@@ -1548,6 +1548,64 @@ mod tests {
     }
 
     #[test]
+    fn stop_after_reset_preserves_credit_with_and_without_loans() {
+        for limit in [0, 16 * KIB, 64 * KIB] {
+            for read in [0, 8 * KIB] {
+                let budget = budget_of(limit);
+                let mut client = lending(&budget);
+                let initial_max = client.local_max_data;
+                let id = uni(0);
+                receive(&mut client, id, 0, 32 * KIB).unwrap();
+                let mut pending = Retransmits::default();
+                if read != 0 {
+                    let mut recv = RecvStream {
+                        id,
+                        state: &mut client,
+                        pending: &mut pending,
+                    };
+                    let mut chunks = recv.read(true).unwrap();
+                    assert_eq!(
+                        chunks.next(read as usize).unwrap().unwrap().bytes.len(),
+                        read as usize
+                    );
+                    let _ = chunks.finalize();
+                }
+                let _ = client
+                    .received_reset(frame::ResetStream {
+                        id,
+                        error_code: 0u32.into(),
+                        final_offset: VarInt::from_u64(48 * KIB).unwrap(),
+                    })
+                    .unwrap();
+                assert_eq!(client.local_max_data, initial_max + 48 * KIB);
+                assert_eq!(client.lent, 0);
+                assert_eq!(*budget.held.lock().unwrap(), 0);
+                RecvStream {
+                    id,
+                    state: &mut client,
+                    pending: &mut pending,
+                }
+                .stop(0u32.into())
+                .unwrap();
+                assert_eq!(client.local_max_data, initial_max + 48 * KIB);
+                assert_eq!(client.bytes_read, 48 * KIB);
+                assert_eq!(*budget.held.lock().unwrap(), 0);
+                assert!(
+                    RecvStream {
+                        id,
+                        state: &mut client,
+                        pending: &mut pending
+                    }
+                    .stop(0u32.into())
+                    .is_err()
+                );
+                drop(client);
+                assert_eq!(*budget.held.lock().unwrap(), 0);
+            }
+        }
+    }
+
+    #[test]
     fn a_window_read_as_fast_as_data_arrives_grows() {
         let budget = std::sync::Arc::new(Counted {
             limit: u64::MAX,
@@ -2508,6 +2566,42 @@ mod tests {
 
         assert_eq!(pending.reset_stream, &[(id, 0u32.into())]);
         assert!(!server.can_send_stream_data());
+    }
+
+    #[test]
+    fn stop_after_reset_flow_control() {
+        let mut client = make(Side::Client);
+        let id = StreamId::new(Side::Server, Dir::Uni, 0);
+        let initial_max = client.local_max_data;
+        let _ = client
+            .received(
+                frame::Stream {
+                    id,
+                    offset: 0,
+                    fin: false,
+                    data: Bytes::from_static(&[0; 32]),
+                },
+                32,
+            )
+            .unwrap();
+        let _ = client
+            .received_reset(frame::ResetStream {
+                id,
+                error_code: 0u32.into(),
+                final_offset: 48u32.into(),
+            })
+            .unwrap();
+        assert_eq!(client.local_max_data - initial_max, 48);
+
+        let mut pending = Retransmits::default();
+        RecvStream {
+            id,
+            state: &mut client,
+            pending: &mut pending,
+        }
+        .stop(0u32.into())
+        .unwrap();
+        assert_eq!(client.local_max_data - initial_max, 48);
     }
 
     #[test]
