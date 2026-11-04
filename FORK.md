@@ -5,8 +5,8 @@ sail's fork of [quinn-rs/quinn](https://github.com/quinn-rs/quinn). The
 version sail uses. sail takes `quinn-proto` and `quinn` from it, at one
 revision, through `[patch.crates-io]`; `quinn-udp`, which `quinn` depends
 on by path, then comes from here too, unpatched. Besides the patches
-below, the crates are the `0.11.x` line's tip, which can be a few
-upstream fixes ahead of the latest release on crates.io (see
+below, the crates follow upstream's `0.11.x` line, with selected fixes
+ahead of the latest release on crates.io (see
 [Ahead of the release](#ahead-of-the-release)).
 
 Upstream is merged into `sail`, never rebased onto it, and the branch is
@@ -155,8 +155,10 @@ minor line (0.12) is a merge of that line, done when sail moves its
 
 ## Ahead of the release
 
-The crates are the `0.11.x` line's tip as of 2026-10-22, past the latest
-releases on crates.io (upstream commits, as merged here):
+The latest full upstream merge is the `0.11.x` line's tip as of
+2026-10-22. The crates include the upstream fixes below beyond their
+releases on crates.io, with three later fixes selectively backported
+on 2026-11-04:
 
 - `quinn` is 0.11.12 and these fixes:
   - `bcd86796`, `handshake_data` is cancellation-safe: retrying it after
@@ -170,6 +172,9 @@ releases on crates.io (upstream commits, as merged here):
   - `c6d94ce4`, no handshake starts once the endpoint driver is gone.
   - `6e5b60d9`, accepting releases the endpoint lock while TLS is set up.
   - `8675d095`, ignored receive errors count toward the receive budget.
+  - `c2a47f6d` (backport), UDP receive errors other than `WouldBlock`
+    reach the endpoint instead of being retried in the Tokio and
+    async-io runtime loops.
 - `quinn-proto` is 0.11.19 and these fixes:
   - `50f5519c`, an illegal ordered read leaves the receive state as it
     was.
@@ -184,6 +189,11 @@ releases on crates.io (upstream commits, as merged here):
   - `98c9372f`, a close reason is cut to fit the error code's width.
   - `5aebe8f7` and the commits before it, acceptance in three phases,
     which `6e5b60d9` builds on.
+  - `4b52785a` (backport), stopping a stream after receiving its reset
+    no longer gives connection-level flow-control credit twice.
+  - `77a51bdc` (backport), MTU probes wait for path validation, so they
+    cannot bypass the anti-amplification limit on an unvalidated path
+    during migration.
 - `quinn-udp` is 0.5.16 and `b86fc003` (`IPV6_V6ONLY` is queried only on
   IPv6 sockets), and one line of a test.
 
